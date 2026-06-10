@@ -1,0 +1,50 @@
+# ====================================================================
+# Telegram Drive Challenge 2026 - Master Git Ignore
+# ====================================================================
+
+# 1. Critical Credentials and Environment Configurations
+.env
+.env.local
+.env.*.local
+
+# 2. Telegram Client Session Data (CRITICAL: Never push these!)
+*.session
+*.session-journal
+
+# 3. Python Virtual Environments and Packages
+.venv/
+venv/
+ENV/
+env/
+wheels/
+*.egg-info/
+.installed.cfg
+.pip-cache/
+
+# 4. Python Bytecode & Cache Directories
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# 5. Local Storage & File Upload Caches
+backend/uploads/*
+# Keep the directory structure intact on Git while ignoring the actual files
+!backend/uploads/.gitkeep
+
+# 6. OS and System Generated Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 7. Code Editors & IDE Settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
