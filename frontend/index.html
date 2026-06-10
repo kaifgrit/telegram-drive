@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Drive - Login</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .auth-card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); width: 100%; max-width: 400px; text-align: center; }
+        h2 { color: #0088cc; margin-bottom: 20px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        button { width: 100%; padding: 12px; background: #0088cc; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0077b3; }
+        .hidden { display: none; }
+        #message { margin-top: 15px; font-size: 14px; color: #666; }
+    </style>
+</head>
+<body>
+
+<div class="auth-card">
+    <h2>Telegram Drive Auth</h2>
+    
+    <div id="step-phone">
+        <p>Enter your phone number connected to Telegram to get started.</p>
+        <input type="text" id="phone" placeholder="+1234567890">
+        <button onclick="sendOtp()">Send OTP</button>
+    </div>
+
+    <div id="step-otp" class="hidden">
+        <p>Enter the verification code sent to your official Telegram app.</p>
+        <input type="text" id="otp" placeholder="Enter Code">
+        <button onclick="verifyOtp()">Verify & Login</button>
+    </div>
+
+    <div id="message"></div>
+</div>
+
+<script>
+    const API_URL = "http://127.0.0.1:8000/api/auth";
+    let userPhone = "";
+
+    async function sendOtp() {
+        userPhone = document.getElementById('phone').value;
+        const msgDiv = document.getElementById('message');
+        msgDiv.innerText = "Sending request...";
+
+        try {
+            const res = await fetch(`${API_URL}/send-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone_number: userPhone })
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                document.getElementById('step-phone').classList.add('hidden');
+                document.getElementById('step-otp').classList.remove('hidden');
+                msgDiv.innerText = "OTP Code sent successfully!";
+                msgDiv.style.color = "green";
+            } else {
+                msgDiv.innerText = `Error: ${data.detail}`;
+                msgDiv.style.color = "red";
+            }
+        } catch (err) {
+            msgDiv.innerText = "Failed to connect to backend.";
+        }
+    }
+
+    async function verifyOtp() {
+        const otpCode = document.getElementById('otp').value;
+        const msgDiv = document.getElementById('message');
+        
+        try {
+            const res = await fetch(`${API_URL}/verify-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone_number: userPhone, otp_code: otpCode })
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                msgDiv.innerText = "Logged in! Next stop: Drive dashboard.";
+                msgDiv.style.color = "green";
+            } else {
+                msgDiv.innerText = `Error: ${data.detail}`;
+                msgDiv.style.color = "red";
+            }
+        } catch (err) {
+            msgDiv.innerText = "Verification connection failed.";
+        }
+    }
+</script>
+</body>
+</html>
