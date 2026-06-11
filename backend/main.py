@@ -2,13 +2,26 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.auth import router as auth_router
+from contextlib import asynccontextmanager
+from backend.database.mongodb import Database
+from backend.api.drive import router as drive_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Connect to Database
+    await Database.connect_db()
+    yield
+    # Shutdown: Clean up connections
+    await Database.close_db()
 
 app = FastAPI(
     title="Telegram Drive API",
     description="A secure virtual drive cloud implementation using Telegram storage.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 app.include_router(auth_router)
+app.include_router(drive_router)
 
 # Enable loose cross-origin access for local frontend development interfaces
 app.add_middleware(
