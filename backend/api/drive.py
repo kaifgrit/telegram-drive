@@ -1,10 +1,18 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+import uuid
+from datetime import datetime
 from backend.services.drive_service import DriveService
-from backend.database.mongodb import get_files_collection
+from backend.database.mongodb import get_files_collection, get_folders_collection
 import io
 
 router = APIRouter(prefix="/api/drive", tags=["Drive"])
+
+class FolderCreateRequest(BaseModel):
+    folder_name: str = Field(..., description="The user-defined folder directory label string")
+    phone_number: str = Field(..., description="The context execution owner phone link")
+    parent_folder_id: str = Field(None, description="The targeted parent folder node UUID identifier string, or null for root workspace")
 
 @router.post("/upload")
 async def upload_file(
@@ -13,6 +21,8 @@ async def upload_file(
     file: UploadFile = File(...)
 ):
     try:
+        # Sanitize empty string parameter payload mutations from web components
+        actual_parent_id = None if not parent_folder_id or parent_folder_id == "null" else parent_folder_id
         file_bytes = await file.read()
         return await DriveService.upload_file(
             file_name=file.filename,
@@ -20,43 +30,69 @@ async def upload_file(
             file_size=len(file_bytes),
             mime_type=file.content_type,
             phone_number=phone_number,
-            parent_folder_id=parent_folder_id
+            parent_folder_id=actual_parent_id
         )
-    except ValueError as v:
-        raise HTTPException(status_code=401, detail=str(v))
-    except PermissionError as p:
-        raise HTTPException(status_code=403, detail=str(p))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/files")
-async def list_files(phone_number: str):
+@router.post("/folder/create")
+async def create_folder(payload: FolderCreateRequest):
+    """
+    Injects an explicit virtual structural branch mapping path node into the collection workspace ledger.
+    """
     try:
-        cursor = get_files_collection().find({"owner_phone": phone_number})
-        files = await cursor.to_list(length=100)
-        return {"status": "success", "files": files}
+        actual_parent_id = None if not payload.parent_folder_id or payload.parent_folder_id == "null" else payload.parent_folder_id
+        
+        folder_document = {
+            "_id": str(uuid.uuid4()),
+            "folder_name": payload.folder_name,
+            "parent_folder_id": actual_parent_id,
+            "owner_phone": payload.phone_number,
+            "created_at": datetime.utcnow().isoformat()
+        }
+        await get_folders_collection().insert_one(folder_document)
+        return {"status": "success", "folder": folder_document}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/explorer/nodes")
+async def explorer_nodes(phone_number: str, parent_folder_id: str = None):
+    """
+    Aggregates files and directories sharing the same structural partition depth level.
+    """
+    try:
+        actual_parent_id = None if not parent_folder_id or parent_folder_id == "null" else parent_folder_id
+        
+        # Build query dictionary target match conditions
+        match_query = {
+            "owner_phone": phone_number,
+            "parent_folder_id": actual_parent_id
+        }
+        
+        # Pull distinct subfolders and files in parallel executions
+        folders_cursor = get_folders_collection().find(match_query)
+        files_cursor = get_files_collection().find(match_query)
+        
+        folders_list = await folders_cursor.to_list(length=100)
+        files_list = await files_cursor.to_list(length=100)
+        
+        return {
+            "status": "success",
+            "current_folder_id": actual_parent_id,
+            "folders": folders_list,
+            "files": files_list
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/download/{file_id}")
 async def download_file(file_id: str, phone_number: str):
-    """
-    Retrieves and streams the raw binary file context directly back to the client.
-    """
     try:
-        # Query MongoDB explicitly using the route values
-        file_meta = await get_files_collection().find_one({
-            "_id": file_id, 
-            "owner_phone": phone_number
-        })
-        
+        file_meta = await get_files_collection().find_one({"_id": file_id, "owner_phone": phone_number})
         if not file_meta:
-            raise HTTPException(status_code=404, detail="File index mapping not found.")
+            raise HTTPException(status_code=404, detail="File metadata structure not found.")
 
-        # Request bytes payload matrix
         file_bytes, filename, mime_type = await DriveService.download_file_bytes(file_meta, phone_number)
-        
-        # Stream the file structure out to the browser
         return StreamingResponse(
             io.BytesIO(file_bytes),
             media_type=mime_type,
