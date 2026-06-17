@@ -1,64 +1,78 @@
 import os
+import io
 import uuid
+import random
 from datetime import datetime
 from telethon import TelegramClient
 from backend.database.mongodb import get_files_collection
 
-API_ID = int(os.getenv("TELEGRAM_API_ID"))
+API_ID = os.getenv("TELEGRAM_API_ID")
 API_HASH = os.getenv("TELEGRAM_API_HASH")
+USE_MOCK_TELEGRAM = os.getenv("USE_MOCK_TELEGRAM", "False").lower() in ("true", "1", "t")
 
 class DriveService:
     @staticmethod
     async def upload_file(file_name: str, file_bytes: bytes, file_size: int, mime_type: str, phone_number: str, parent_folder_id: str = None):
+        file_id = str(uuid.uuid4())
+        uploaded_at = datetime.utcnow().isoformat()
+
+        if USE_MOCK_TELEGRAM:
+            print(f"⚙️ [MOCK MODE] Simulating file upload to Telegram: {file_name}")
+            telegram_message_id = random.randint(1000, 99999)
+        else:
+            clean_phone = phone_number.replace('+', '').strip()
+            session_path = f"backend/uploads/session_{clean_phone}"
+            if not os.path.exists(f"{session_path}.session"):
+                raise ValueError("Authorized user session file not found on disk.")
+
+            client = TelegramClient(session_path, int(API_ID), API_HASH)
+            await client.connect()
+            if not await client.is_user_authorized():
+                await client.disconnect()
+                raise PermissionError("Your session is unauthorized or has expired.")
+            try:
+                file_buffer = io.BytesIO(file_bytes)
+                file_buffer.name = file_name
+                uploaded_msg = await client.send_file('me', file_buffer, force_document=True)
+                telegram_message_id = uploaded_msg.id
+            finally:
+                await client.disconnect()
+
+        file_document = {
+            "_id": file_id,
+            "filename": file_name,
+            "size": file_size,
+            "mime_type": mime_type,
+            "telegram_message_id": telegram_message_id,
+            "parent_folder_id": parent_folder_id,
+            "owner_phone": phone_number,
+            "uploaded_at": uploaded_at
+        }
+        await get_files_collection().insert_one(file_document)
+        return {"status": "success", "file": file_document}
+
+    @staticmethod
+    async def download_file_bytes(file_meta: dict, phone_number: str):
         """
-        Uploads an incoming file buffer to Telegram, captures its Message ID, 
-        and records the structural metadata into MongoDB.
+        Extracts document arrays. Pulls mock strings if active, or connects to the live Telegram grid.
         """
-        # Format the session path based on the user's phone number
-        clean_phone = phone_number.replace('+', '')
-        session_path = f"backend/uploads/session_{clean_phone}"
-        
-        if not os.path.exists(f"{session_path}.session"):
-            raise ValueError("User session not found. Please log in first.")
+        filename = file_meta["filename"]
+        mime_type = file_meta.get("mime_type", "application/octet-stream")
 
-        # Re-initialize the active user client session
-        client = TelegramClient(session_path, API_ID, API_HASH)
-        await client.connect()
-
-        if not await client.is_user_authorized():
-            await client.disconnect()
-            raise PermissionError("Telegram session has expired or is invalid.")
-
-        try:
-            # 1. Pipe the file stream to Telegram's "Saved Messages" (entity='me')
-            # Using a named BytesIO buffer mimics a real filesystem file object
-            import io
-            file_buffer = io.BytesIO(file_bytes)
-            file_buffer.name = file_name
-            
-            # Send file to Telegram
-            uploaded_msg = await client.send_file('me', file_buffer, force_document=True)
-            
-            # 2. Extract structural IDs from the upload event response
-            telegram_message_id = uploaded_msg.id
-            
-            # 3. Formulate the VFS mapping schema document
-            file_document = {
-                "_id": str(uuid.uuid4()),
-                "filename": file_name,
-                "size": file_size,
-                "mime_type": mime_type,
-                "telegram_message_id": telegram_message_id,
-                "parent_folder_id": parent_folder_id, # link to virtual folder or null for root
-                "owner_phone": phone_number,
-                "uploaded_at": datetime.utcnow().isoformat()
-            }
-            
-            # 4. Insert directly into MongoDB files collection
-            files_col = get_files_collection()
-            await files_col.insert_one(file_document)
-            
-            return {"status": "success", "file": file_document}
-            
-        finally:
-            await client.disconnect()
+        if USE_MOCK_TELEGRAM:
+            # Simulated binary file fallback array data 
+            print(f"⚙️ [MOCK MODE] Generating dummy streaming response for: {filename}")
+            mock_data = f"Simulated cloud binary payload content data stream for file: {filename}".encode('utf-8')
+            return mock_data, filename, mime_type
+        else:
+            clean_phone = phone_number.replace('+', '').strip()
+            session_path = f"backend/uploads/session_{clean_phone}"
+            client = TelegramClient(session_path, int(API_ID), API_HASH)
+            await client.connect()
+            try:
+                # Fetch target message sequence via ID references
+                msg = await client.get_messages('me', ids=file_meta["telegram_message_id"])
+                file_bytes = await client.download_media(msg.document, bytes)
+                return file_bytes, filename, mime_type
+            finally:
+                await client.disconnect()
