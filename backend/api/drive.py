@@ -21,8 +21,12 @@ async def upload_file(
     file: UploadFile = File(...)
 ):
     try:
-        # Sanitize empty string parameter payload mutations from web components
-        actual_parent_id = None if not parent_folder_id or parent_folder_id == "null" else parent_folder_id
+        # STRICT NULL HANDLING: Convert string "null" or empty strings to Python None
+        if not parent_folder_id or str(parent_folder_id).strip().lower() == "null" or parent_folder_id == "":
+            actual_parent_id = None
+        else:
+            actual_parent_id = parent_folder_id
+
         file_bytes = await file.read()
         return await DriveService.upload_file(
             file_name=file.filename,
@@ -33,6 +37,7 @@ async def upload_file(
             parent_folder_id=actual_parent_id
         )
     except Exception as e:
+        print(f"Upload Error: {e}") # Backend logging for debugging
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/folder/create")
@@ -41,7 +46,11 @@ async def create_folder(payload: FolderCreateRequest):
     Injects an explicit virtual structural branch mapping path node into the collection workspace ledger.
     """
     try:
-        actual_parent_id = None if not payload.parent_folder_id or payload.parent_folder_id == "null" else payload.parent_folder_id
+        # STRICT NULL HANDLING
+        if not payload.parent_folder_id or str(payload.parent_folder_id).strip().lower() == "null" or payload.parent_folder_id == "":
+            actual_parent_id = None
+        else:
+            actual_parent_id = payload.parent_folder_id
         
         folder_document = {
             "_id": str(uuid.uuid4()),
@@ -53,6 +62,7 @@ async def create_folder(payload: FolderCreateRequest):
         await get_folders_collection().insert_one(folder_document)
         return {"status": "success", "folder": folder_document}
     except Exception as e:
+        print(f"Folder Create Error: {e}") 
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/explorer/nodes")
@@ -61,7 +71,11 @@ async def explorer_nodes(phone_number: str, parent_folder_id: str = None):
     Aggregates files and directories sharing the same structural partition depth level.
     """
     try:
-        actual_parent_id = None if not parent_folder_id or parent_folder_id == "null" else parent_folder_id
+        # STRICT NULL HANDLING
+        if not parent_folder_id or str(parent_folder_id).strip().lower() == "null" or parent_folder_id == "":
+            actual_parent_id = None
+        else:
+            actual_parent_id = parent_folder_id
         
         # Build query dictionary target match conditions
         match_query = {
@@ -83,6 +97,7 @@ async def explorer_nodes(phone_number: str, parent_folder_id: str = None):
             "files": files_list
         }
     except Exception as e:
+        print(f"Explorer Nodes Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/download/{file_id}")
@@ -101,5 +116,22 @@ async def download_file(file_id: str, phone_number: str):
                 "Access-Control-Expose-Headers": "Content-Disposition"
             }
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/file/{file_id}")
+async def delete_file_endpoint(file_id: str, phone_number: str):
+    try:
+        return await DriveService.delete_file(file_id, phone_number)
+    except ValueError as v:
+        raise HTTPException(status_code=404, detail=str(v))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/folder/{folder_id}")
+async def delete_folder_endpoint(folder_id: str, phone_number: str):
+    try:
+        await DriveService.delete_folder_recursive(folder_id, phone_number)
+        return {"status": "success", "detail": "Directory branch cascade deletion complete."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
