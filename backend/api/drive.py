@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional
 import uuid
 from datetime import datetime
 from backend.services.drive_service import DriveService
@@ -9,10 +10,19 @@ import io
 
 router = APIRouter(prefix="/api/drive", tags=["Drive"])
 
+def parse_null_string(val: str) -> Optional[str]:
+    if not val or str(val).strip().lower() == "null":
+        return None
+    return val
+
 class FolderCreateRequest(BaseModel):
-    folder_name: str = Field(..., description="The user-defined folder directory label string")
-    phone_number: str = Field(..., description="The context execution owner phone link")
-    parent_folder_id: str = Field(None, description="The targeted parent folder node UUID identifier string, or null for root workspace")
+    folder_name: str
+    phone_number: str
+    parent_folder_id: Optional[str] = None
+
+    @field_validator('parent_folder_id', mode='before')
+    def parse_parent_id(cls, v):
+        return parse_null_string(v)
 
 @router.post("/upload")
 async def upload_file(
@@ -21,12 +31,7 @@ async def upload_file(
     file: UploadFile = File(...)
 ):
     try:
-        # STRICT NULL HANDLING: Convert string "null" or empty strings to Python None
-        if not parent_folder_id or str(parent_folder_id).strip().lower() == "null" or parent_folder_id == "":
-            actual_parent_id = None
-        else:
-            actual_parent_id = parent_folder_id
-
+        actual_parent_id = parse_null_string(parent_folder_id)
         file_bytes = await file.read()
         return await DriveService.upload_file(
             file_name=file.filename,
@@ -37,58 +42,37 @@ async def upload_file(
             parent_folder_id=actual_parent_id
         )
     except Exception as e:
-        print(f"Upload Error: {e}") # Backend logging for debugging
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/folder/create")
 async def create_folder(payload: FolderCreateRequest):
-    """
-    Injects an explicit virtual structural branch mapping path node into the collection workspace ledger.
-    """
     try:
-        # STRICT NULL HANDLING
-        if not payload.parent_folder_id or str(payload.parent_folder_id).strip().lower() == "null" or payload.parent_folder_id == "":
-            actual_parent_id = None
-        else:
-            actual_parent_id = payload.parent_folder_id
+        ancestors = await DriveService._get_ancestors(payload.parent_folder_id)
         
         folder_document = {
             "_id": str(uuid.uuid4()),
             "folder_name": payload.folder_name,
-            "parent_folder_id": actual_parent_id,
+            "parent_folder_id": payload.parent_folder_id,
+            "ancestors": ancestors,
             "owner_phone": payload.phone_number,
             "created_at": datetime.utcnow().isoformat()
         }
         await get_folders_collection().insert_one(folder_document)
         return {"status": "success", "folder": folder_document}
     except Exception as e:
-        print(f"Folder Create Error: {e}") 
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/explorer/nodes")
 async def explorer_nodes(phone_number: str, parent_folder_id: str = None):
-    """
-    Aggregates files and directories sharing the same structural partition depth level.
-    """
     try:
-        # STRICT NULL HANDLING
-        if not parent_folder_id or str(parent_folder_id).strip().lower() == "null" or parent_folder_id == "":
-            actual_parent_id = None
-        else:
-            actual_parent_id = parent_folder_id
-        
-        # Build query dictionary target match conditions
+        actual_parent_id = parse_null_string(parent_folder_id)
         match_query = {
             "owner_phone": phone_number,
             "parent_folder_id": actual_parent_id
         }
         
-        # Pull distinct subfolders and files in parallel executions
-        folders_cursor = get_folders_collection().find(match_query)
-        files_cursor = get_files_collection().find(match_query)
-        
-        folders_list = await folders_cursor.to_list(length=100)
-        files_list = await files_cursor.to_list(length=100)
+        folders_list = await get_folders_collection().find(match_query).to_list(length=100)
+        files_list = await get_files_collection().find(match_query).to_list(length=100)
         
         return {
             "status": "success",
@@ -97,7 +81,6 @@ async def explorer_nodes(phone_number: str, parent_folder_id: str = None):
             "files": files_list
         }
     except Exception as e:
-        print(f"Explorer Nodes Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/download/{file_id}")

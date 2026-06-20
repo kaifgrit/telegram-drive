@@ -25,7 +25,7 @@ def get_files_collection():
     return Database.db["files"]
 
 def get_folders_collection():
-    """
-    Returns the virtual folders collection pointer allocation space.
-    """
     return Database.db["folders"]
+
+def get_auth_collection():
+    return Database.db["auth_sessions"]
